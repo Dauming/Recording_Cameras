@@ -126,6 +126,23 @@ protected:
 							undistortedDepthImage.convertTo(displayImage, CV_8UC1, 255.0 / 5000);
 							cv::applyColorMap(displayImage, displayImage, cv::COLORMAP_JET);
 							//cv::imshow("Depth Image", displayImage);
+
+							auto now = std::chrono::high_resolution_clock::now();
+							auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
+							auto epoch = now_ms.time_since_epoch();
+							auto value = std::chrono::duration_cast<std::chrono::milliseconds>(epoch);
+							long duration = value.count();
+
+							std::string current_time_ms = std::to_string(duration);
+
+							int fontFace = cv::FONT_HERSHEY_SIMPLEX;
+							double fontScale = 0.5;
+							int thickness = 1;
+							cv::Point textOrg(500, 470); // Position for the text, adjust as needed
+
+							cv::putText(displayImage, current_time_ms, textOrg, fontFace, fontScale,
+								cv::Scalar::all(255), thickness, 8);
+
 							std::string windowName = "Depth Image " + std::to_string(thiz->cameraId);
 							cv::imshow(windowName, displayImage);  // 윈도우 이름 변경
 							if (thiz->videoWriter.isOpened()) {
@@ -137,10 +154,9 @@ protected:
 				}
 			}
 		}
-		
-    if (thiz->videoWriter.isOpened()) {
-        thiz->videoWriter.release();
-    }
+		if (thiz->videoWriter.isOpened()) {
+			thiz->videoWriter.release();
+		}
 	}
 
 public:
@@ -177,6 +193,89 @@ protected:
 	std::thread mReadFrameThread;
 	std::queue<meere::sensor::sptr_frame_list> mFrameListQueue;
 } _ReceivedDepthFrameSink1(1), _ReceivedDepthFrameSink2(2);
+
+class WebcamHandler {
+public:
+	cv::VideoCapture cap;
+	cv::VideoWriter videoWriter;
+
+	WebcamHandler() {
+		// Initialize webcam stream (0 for the default webcam)
+		int cameraIndex = selectCamera();
+		cap.open(cameraIndex);
+
+		// Initialize VideoWriter for the webcam
+		videoWriter.open("webcam_output.avi", cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), 30, cv::Size(640, 480), true);
+	}
+
+	int selectCamera() {
+		std::cout << "Available cameras:\n";
+		int maxCameras = 10;
+		for (int i = 0; i < maxCameras; ++i) {
+			cv::VideoCapture testCap(i);
+			if (testCap.isOpened()) {
+				std::cout << "Camera Index " << i << " available\n";
+				testCap.release();
+			}
+		}
+
+		std::cout << "Enter the camera index to use: ";
+		int index;
+		std::cin >> index;
+		return index;
+	}
+
+
+	void processWebcamFrames() {
+		cv::Mat frame;
+		auto start = std::chrono::high_resolution_clock::now();
+
+		while (true) {
+			auto now = std::chrono::high_resolution_clock::now();
+			auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
+
+			if (duration >= 10) {
+				break; // 10초 후에 촬영 중단
+			}
+
+			if (!cap.read(frame)) {
+				break;  // 프레임이 없으면 루프 종료
+			}
+
+			auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
+			auto epoch = now_ms.time_since_epoch();
+			auto value = std::chrono::duration_cast<std::chrono::milliseconds>(epoch);
+			long duration2 = value.count();
+
+			std::string current_time_ms = std::to_string(duration2);;
+
+			int fontFace = cv::FONT_HERSHEY_SIMPLEX;
+			double fontScale = 0.5;
+			int thickness = 1;
+			cv::Point textOrg(500, 470); // Position for the text, adjust as needed
+
+			cv::putText(frame, current_time_ms, textOrg, fontFace, fontScale,
+				cv::Scalar::all(255), thickness, 8);
+
+			// 프레임 표시
+			cv::imshow("Webcam", frame);
+
+			// 파일에 프레임 쓰기
+			if (videoWriter.isOpened()) {
+				videoWriter.write(frame);
+			}
+
+			if (cv::waitKey(1) >= 0) {
+				break;  // 키 입력시 루프 종료
+			}
+		}
+
+		// VideoWriter 객체 해제
+		if (videoWriter.isOpened()) {
+			videoWriter.release();
+		}
+	}
+};
 
 void initializeAndRunCamera(meere::sensor::sptr_camera& camera, ReceivedDepthFrameSink* sink) {
 	if (!camera) {
@@ -230,11 +329,13 @@ int main(int argc, char* argv[])
 	meere::sensor::sptr_camera _camera1 = meere::sensor::create_camera(_source_list->at(0));
 	meere::sensor::sptr_camera _camera2 = meere::sensor::create_camera(_source_list->at(1));
 
-	    // 별도의 스레드에서 각 카메라 초기화 및 실행
+	WebcamHandler webcamHandler;
+	std::thread webcamThread(&WebcamHandler::processWebcamFrames, &webcamHandler);
     std::thread camera1Thread(initializeAndRunCamera, std::ref(_camera1), &_ReceivedDepthFrameSink1);
     std::thread camera2Thread(initializeAndRunCamera, std::ref(_camera2), &_ReceivedDepthFrameSink2);
 
     // 스레드가 종료될 때까지 대기
+	webcamThread.join();
     camera1Thread.join();
     camera2Thread.join();
 
