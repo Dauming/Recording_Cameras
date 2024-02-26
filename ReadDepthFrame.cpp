@@ -25,7 +25,7 @@ static class ReceivedDepthFrameSink : public meere::sensor::sink
 {
 public:
 	int cameraId;  // 카메라 ID 추가
-
+	cv::VideoWriter videoWriter;
 	ReceivedDepthFrameSink(int id) : cameraId(id) {}  // 생성자 추가
 
 	virtual std::string name() const {
@@ -70,6 +70,9 @@ public:
 
 protected:
 	static void ReadFrameProc(ReceivedDepthFrameSink* thiz) {
+		thiz->videoWriter.open("camera_" + std::to_string(thiz->cameraId) + ".avi",
+			cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), 30,
+			cv::Size(640, 480), true);
 		while (thiz->mReadFrameThreadStart) {
 			if (thiz->mFrameListQueue.empty()) {
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -125,12 +128,19 @@ protected:
 							//cv::imshow("Depth Image", displayImage);
 							std::string windowName = "Depth Image " + std::to_string(thiz->cameraId);
 							cv::imshow(windowName, displayImage);  // 윈도우 이름 변경
+							if (thiz->videoWriter.isOpened()) {
+								thiz->videoWriter.write(displayImage);
+							}
 							cv::waitKey(1); // GUI 이벤트 처리
 						}
 					}
 				}
 			}
 		}
+		
+    if (thiz->videoWriter.isOpened()) {
+        thiz->videoWriter.release();
+    }
 	}
 
 public:
@@ -220,13 +230,13 @@ int main(int argc, char* argv[])
 	meere::sensor::sptr_camera _camera1 = meere::sensor::create_camera(_source_list->at(0));
 	meere::sensor::sptr_camera _camera2 = meere::sensor::create_camera(_source_list->at(1));
 
-	// 별도의 스레드에서 각 카메라 초기화 및 실행
-	std::thread camera1Thread(initializeAndRunCamera, std::ref(_camera1), &_ReceivedDepthFrameSink1);
-	std::thread camera2Thread(initializeAndRunCamera, std::ref(_camera2), &_ReceivedDepthFrameSink2);
+	    // 별도의 스레드에서 각 카메라 초기화 및 실행
+    std::thread camera1Thread(initializeAndRunCamera, std::ref(_camera1), &_ReceivedDepthFrameSink1);
+    std::thread camera2Thread(initializeAndRunCamera, std::ref(_camera2), &_ReceivedDepthFrameSink2);
 
-	// 스레드가 종료될 때까지 대기
-	camera1Thread.join();
-	camera2Thread.join();
+    // 스레드가 종료될 때까지 대기
+    camera1Thread.join();
+    camera2Thread.join();
 
-	return 0;
+    return 0;
 }
